@@ -22,9 +22,20 @@ n_points = 3
 n_components = 50
 random_state = 0
 
-[tsne]
+[embedding]
+method = "tsne"
+n_components = 2
+
+[embedding.tsne]
 perplexity = 2.0
+learning_rate = "auto"
 max_iter = 250
+random_state = 0
+
+[embedding.umap]
+n_neighbors = 15
+min_dist = 0.1
+metric = "euclidean"
 random_state = 0
 
 [dbscan]
@@ -45,6 +56,8 @@ def test_load_config_roundtrip(tmp_path: Path) -> None:
     assert cfg.preprocess.intensity_normalization == "l2"
     assert cfg.dbscan.min_samples == 2
     assert cfg.visualize.xrd_min_panel_height_px == 240
+    assert cfg.embedding.method == "tsne"
+    assert cfg.embedding.n_components == 2
 
 
 def test_theta_order_validated(tmp_path: Path) -> None:
@@ -78,6 +91,14 @@ def test_pca_n_components_minimum(tmp_path: Path) -> None:
         load_config(p)
 
 
+def test_embedding_n_components_must_be_two(tmp_path: Path) -> None:
+    text = _minimal_valid_toml().replace("n_components = 2", "n_components = 3", 1)
+    p = tmp_path / "cfg.toml"
+    p.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(p)
+
+
 def test_preprocess_invalid_mode(tmp_path: Path) -> None:
     extra = '\n[preprocess]\nintensity_normalization = "invalid"\n'
     p = tmp_path / "cfg.toml"
@@ -94,20 +115,29 @@ def test_preprocess_explicit_none(tmp_path: Path) -> None:
     assert cfg.preprocess.intensity_normalization == "none"
 
 
-def test_dbscan_clustering_space_defaults_to_feature(tmp_path: Path) -> None:
+def test_dbscan_clustering_space_defaults_to_scaled(tmp_path: Path) -> None:
     p = tmp_path / "cfg.toml"
     p.write_text(_minimal_valid_toml(), encoding="utf-8")
     cfg = load_config(p)
-    assert cfg.dbscan.clustering_space == "feature"
+    assert cfg.dbscan.clustering_space == "scaled"
 
 
-def test_dbscan_clustering_space_tsne(tmp_path: Path) -> None:
-    extra = '\n[dbscan]\neps = 1.0\nmin_samples = 2\nclustering_space = "tsne"\n'
+def test_dbscan_clustering_space_embedding(tmp_path: Path) -> None:
+    extra = '\n[dbscan]\neps = 1.0\nmin_samples = 2\nclustering_space = "embedding"\n'
     text = _minimal_valid_toml().replace("[dbscan]\neps = 1.0\nmin_samples = 2\n", extra)
     p = tmp_path / "cfg.toml"
     p.write_text(text, encoding="utf-8")
     cfg = load_config(p)
-    assert cfg.dbscan.clustering_space == "tsne"
+    assert cfg.dbscan.clustering_space == "embedding"
+
+
+def test_dbscan_clustering_space_pca(tmp_path: Path) -> None:
+    extra = '\n[dbscan]\neps = 1.0\nmin_samples = 2\nclustering_space = "pca"\n'
+    text = _minimal_valid_toml().replace("[dbscan]\neps = 1.0\nmin_samples = 2\n", extra)
+    p = tmp_path / "cfg.toml"
+    p.write_text(text, encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg.dbscan.clustering_space == "pca"
 
 
 def test_dbscan_clustering_space_pca2d(tmp_path: Path) -> None:
@@ -126,6 +156,14 @@ def test_dbscan_invalid_clustering_space(tmp_path: Path) -> None:
     p.write_text(text, encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(p)
+
+
+def test_embedding_method_umap(tmp_path: Path) -> None:
+    text = _minimal_valid_toml().replace('method = "tsne"', 'method = "umap"')
+    p = tmp_path / "cfg.toml"
+    p.write_text(text, encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg.embedding.method == "umap"
 
 
 def test_grid_exclude_ranges_roundtrip(tmp_path: Path) -> None:

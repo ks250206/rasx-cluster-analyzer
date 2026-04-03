@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rasx-cluster-analyzer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cluster XRD patterns from Rigaku rasX map scans and visualize with PCA/t-SNE"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -13,6 +13,7 @@ dependencies = [
     "polars>=1.0",
     "scikit-learn>=1.5",
     "plotly>=5.24",
+    "umap-learn>=0.5.6",
 ]
 
 [project.scripts]

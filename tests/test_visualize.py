@@ -11,11 +11,13 @@ import pytest
 from rasx_cluster_analyzer.config import (
     AppConfig,
     DbscanConfig,
+    EmbeddingConfig,
     GridConfig,
     PathsConfig,
     PcaConfig,
     PreprocessConfig,
-    TsneConfig,
+    TsneEmbedParams,
+    UmapEmbedParams,
     VisualizeConfig,
 )
 from rasx_cluster_analyzer.visualize import (
@@ -40,8 +42,23 @@ def _minimal_cfg() -> AppConfig:
         ),
         preprocess=PreprocessConfig(intensity_normalization="none"),
         pca=PcaConfig(n_components=2, random_state=0),
-        tsne=TsneConfig(perplexity=2.0, max_iter=100, random_state=0),
-        dbscan=DbscanConfig(eps=1.0, min_samples=2, clustering_space="feature"),
+        embedding=EmbeddingConfig(
+            method="tsne",
+            n_components=2,
+            tsne=TsneEmbedParams(
+                perplexity=2.0,
+                learning_rate="auto",
+                random_state=0,
+                max_iter=250,
+            ),
+            umap=UmapEmbedParams(
+                n_neighbors=15,
+                min_dist=0.1,
+                metric="euclidean",
+                random_state=0,
+            ),
+        ),
+        dbscan=DbscanConfig(eps=1.0, min_samples=2, clustering_space="scaled"),
         visualize=VisualizeConfig(xrd_min_panel_height_px=280),
     )
 
@@ -54,6 +71,7 @@ def test_secondary_embedding_axis_titles_inference() -> None:
         "UMAP dimension 1",
         "UMAP dimension 2",
     )
+    assert _secondary_embedding_axis_titles("PCA: PC1 vs PC2 (2D embedding)") == ("PC1", "PC2")
     assert _secondary_embedding_axis_titles("Other embedding") == (
         "Embedding dimension 1",
         "Embedding dimension 2",
@@ -86,7 +104,7 @@ def test_xrd_controls_script_applies_and_resets_floor_and_offset() -> None:
     assert 'const yOffset = parseNumber(data.get("y_offset"));' in script
     assert "const shifted = value + offsetValue;" in script
     assert "floorValue == null || shifted >= floorValue ? shifted : floorValue" in script
-    assert 'Plotly.restyle(plot, {y: [nextRow]}, [index]);' in script
+    assert "Plotly.restyle(plot, {y: [nextRow]}, [index]);" in script
     assert "applyIntensityTransform(plot, null, 0);" in script
 
 
@@ -238,7 +256,7 @@ def test_write_cluster_map_html_layout(tmp_path: Path) -> None:
     assert "rasx-embedding-plot" in text
     assert "rasx-xrd-plot-0" in text
     assert 'class="plotly-graph-div rasx-xrd-plot"' in text
-    assert '__rasxOriginalY = [[' in text
+    assert "__rasxOriginalY = [[" in text
     assert 'class="rasx-xrd-plot" class="plotly-graph-div"' not in text
     assert "plot-gap" in text
     assert "rasx-meta-sidebar" in text

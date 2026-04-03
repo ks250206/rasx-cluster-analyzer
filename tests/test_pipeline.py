@@ -9,11 +9,13 @@ import pytest
 from rasx_cluster_analyzer.config import (
     AppConfig,
     DbscanConfig,
+    EmbeddingConfig,
     GridConfig,
     PathsConfig,
     PcaConfig,
     PreprocessConfig,
-    TsneConfig,
+    TsneEmbedParams,
+    UmapEmbedParams,
     VisualizeConfig,
 )
 from rasx_cluster_analyzer.pipeline import (
@@ -24,13 +26,28 @@ from rasx_cluster_analyzer.pipeline import (
 from tests.conftest import minimal_rasx_bytes
 
 
-def _cfg(*, output: str | None = None, clustering_space: str = "feature") -> AppConfig:
+def _cfg(*, output: str | None = None, clustering_space: str = "scaled") -> AppConfig:
     return AppConfig(
         paths=PathsConfig(output_html=output),
         grid=GridConfig(theta_min=10.0, theta_max=30.0, n_points=5),
         preprocess=PreprocessConfig(intensity_normalization="l2"),
         pca=PcaConfig(n_components=5, random_state=0),
-        tsne=TsneConfig(perplexity=2.0, max_iter=250, random_state=0),
+        embedding=EmbeddingConfig(
+            method="tsne",
+            n_components=2,
+            tsne=TsneEmbedParams(
+                perplexity=2.0,
+                learning_rate="auto",
+                random_state=0,
+                max_iter=250,
+            ),
+            umap=UmapEmbedParams(
+                n_neighbors=15,
+                min_dist=0.1,
+                metric="euclidean",
+                random_state=0,
+            ),
+        ),
         dbscan=DbscanConfig(eps=50.0, min_samples=2, clustering_space=clustering_space),
         visualize=VisualizeConfig(),
     )
@@ -62,25 +79,53 @@ def test_run_analysis_writes_html(tmp_path: Path) -> None:
     assert "plotly" in text.lower() or "Plotly" in text
 
 
-def test_resolve_clustering_input_feature_space() -> None:
-    xs = pytest.importorskip("numpy").array([[1.0, 2.0], [3.0, 4.0]])
-    pca_xy = pytest.importorskip("numpy").array([[100.0, 200.0], [300.0, 400.0]])
-    tsne_xy = pytest.importorskip("numpy").array([[10.0, 20.0], [30.0, 40.0]])
-    selected = resolve_clustering_input(xs, pca_xy, tsne_xy, _cfg())
+def test_resolve_clustering_input_scaled_space() -> None:
+    np = pytest.importorskip("numpy")
+    xs = np.array([[1.0, 2.0], [3.0, 4.0]])
+    pca_xy = np.array([[100.0, 200.0], [300.0, 400.0]])
+    X_pca = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    embed_xy = np.array([[10.0, 20.0], [30.0, 40.0]])
+    selected = resolve_clustering_input(xs, pca_xy, X_pca, embed_xy, _cfg())
     assert selected is xs
 
 
-def test_resolve_clustering_input_tsne_space() -> None:
-    xs = pytest.importorskip("numpy").array([[1.0, 2.0], [3.0, 4.0]])
-    pca_xy = pytest.importorskip("numpy").array([[100.0, 200.0], [300.0, 400.0]])
-    tsne_xy = pytest.importorskip("numpy").array([[10.0, 20.0], [30.0, 40.0]])
-    selected = resolve_clustering_input(xs, pca_xy, tsne_xy, _cfg(clustering_space="tsne"))
-    assert selected is tsne_xy
+def test_resolve_clustering_input_embedding_space() -> None:
+    np = pytest.importorskip("numpy")
+    xs = np.array([[1.0, 2.0], [3.0, 4.0]])
+    pca_xy = np.array([[100.0, 200.0], [300.0, 400.0]])
+    X_pca = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    embed_xy = np.array([[10.0, 20.0], [30.0, 40.0]])
+    selected = resolve_clustering_input(
+        xs,
+        pca_xy,
+        X_pca,
+        embed_xy,
+        _cfg(clustering_space="embedding"),
+    )
+    assert selected is embed_xy
+
+
+def test_resolve_clustering_input_pca_space() -> None:
+    np = pytest.importorskip("numpy")
+    xs = np.array([[1.0, 2.0], [3.0, 4.0]])
+    pca_xy = np.array([[100.0, 200.0], [300.0, 400.0]])
+    X_pca = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    embed_xy = np.array([[10.0, 20.0], [30.0, 40.0]])
+    selected = resolve_clustering_input(xs, pca_xy, X_pca, embed_xy, _cfg(clustering_space="pca"))
+    assert selected is X_pca
 
 
 def test_resolve_clustering_input_pca2d_space() -> None:
-    xs = pytest.importorskip("numpy").array([[1.0, 2.0], [3.0, 4.0]])
-    pca_xy = pytest.importorskip("numpy").array([[100.0, 200.0], [300.0, 400.0]])
-    tsne_xy = pytest.importorskip("numpy").array([[10.0, 20.0], [30.0, 40.0]])
-    selected = resolve_clustering_input(xs, pca_xy, tsne_xy, _cfg(clustering_space="pca2d"))
+    np = pytest.importorskip("numpy")
+    xs = np.array([[1.0, 2.0], [3.0, 4.0]])
+    pca_xy = np.array([[100.0, 200.0], [300.0, 400.0]])
+    X_pca = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    embed_xy = np.array([[10.0, 20.0], [30.0, 40.0]])
+    selected = resolve_clustering_input(
+        xs,
+        pca_xy,
+        X_pca,
+        embed_xy,
+        _cfg(clustering_space="pca2d"),
+    )
     assert selected is pca_xy

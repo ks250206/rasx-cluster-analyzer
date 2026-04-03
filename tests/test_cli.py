@@ -24,9 +24,20 @@ n_points = 5
 n_components = 5
 random_state = 0
 
-[tsne]
+[embedding]
+method = "tsne"
+n_components = 2
+
+[embedding.tsne]
 perplexity = 2.0
+learning_rate = "auto"
 max_iter = 250
+random_state = 0
+
+[embedding.umap]
+n_neighbors = 15
+min_dist = 0.1
+metric = "euclidean"
 random_state = 0
 
 [dbscan]

@@ -16,7 +16,11 @@ from rasx_cluster_analyzer.features import (
     normalize_intensity_rows,
     theta_grid,
 )
-from rasx_cluster_analyzer.reduction import pca_for_display_and_tsne, run_tsne_on_pca
+from rasx_cluster_analyzer.reduction import (
+    pca_for_display_and_tsne,
+    run_tsne_on_pca,
+    run_umap_on_pca,
+)
 from rasx_cluster_analyzer.visualize import write_cluster_map_html
 
 logger = logging.getLogger(__name__)
@@ -34,14 +38,18 @@ def resolve_output_path(rasx_dir: str | Path, cfg: AppConfig) -> Path:
 def resolve_clustering_input(
     feature_matrix: np.ndarray,
     pca_xy: np.ndarray,
-    tsne_xy: np.ndarray,
+    X_pca: np.ndarray,
+    embed_xy: np.ndarray,
     cfg: AppConfig,
 ) -> np.ndarray:
     """Select the feature space used by DBSCAN."""
-    if cfg.dbscan.clustering_space == "tsne":
-        return tsne_xy
-    if cfg.dbscan.clustering_space == "pca2d":
+    space = cfg.dbscan.clustering_space
+    if space == "embedding":
+        return embed_xy
+    if space == "pca2d":
         return pca_xy
+    if space == "pca":
+        return X_pca
     return feature_matrix
 
 
@@ -51,9 +59,18 @@ def resolve_secondary_embedding(
     cfg: AppConfig,
 ) -> tuple[np.ndarray, str]:
     """Return the right-hand embedding panel coordinates and title."""
-    if cfg.dbscan.clustering_space == "pca2d":
-        return pca_xy, "PCA space used for DBSCAN"
-    return run_tsne_on_pca(X_pca, cfg.tsne), "t-SNE (after PCA)"
+    m = cfg.embedding.method
+    if m == "pca2d":
+        return pca_xy, "PCA: PC1 vs PC2 (2D embedding)"
+    if m == "umap":
+        xy = run_umap_on_pca(
+            X_pca,
+            cfg.embedding.umap,
+            n_components=cfg.embedding.n_components,
+        )
+        return xy, "UMAP (after PCA)"
+    xy = run_tsne_on_pca(X_pca, cfg.embedding.tsne)
+    return xy, "t-SNE (after PCA)"
 
 
 def run_analysis(rasx_dir: str | Path, cfg: AppConfig) -> Path:
@@ -85,7 +102,7 @@ def run_analysis(rasx_dir: str | Path, cfg: AppConfig) -> Path:
 
     pca_xy, X_pca = pca_for_display_and_tsne(Xs, cfg.pca)
     secondary_xy, secondary_title = resolve_secondary_embedding(pca_xy, X_pca, cfg)
-    cluster_input = resolve_clustering_input(Xs, pca_xy, secondary_xy, cfg)
+    cluster_input = resolve_clustering_input(Xs, pca_xy, X_pca, secondary_xy, cfg)
     logger.info("DBSCAN clustering space: %s", cfg.dbscan.clustering_space)
 
     labels = run_dbscan(cluster_input, cfg.dbscan)

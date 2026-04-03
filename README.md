@@ -1,11 +1,11 @@
 # rasx-cluster-analyzer
 
-Rigaku のXYマップ測定用 **rasX** をまとめて読み込み、XRD 回折パターンを **DBSCAN** でクラスタリングし、**PCA** と必要に応じて **t-SNE** を使って 2 次元表示します。結果は **Plotly** の HTML で出力します。
+Rigaku のXYマップ測定用 **rasX** をまとめて読み込み、XRD 回折パターンを **DBSCAN** でクラスタリングし、**PCA** と設定に応じて **t-SNE**・**UMAP** または **PCA 2D** で右パネルを 2 次元表示します。結果は **Plotly** の HTML で出力します。
 
 ## HTML の構成
 
 - メイン列（左）
-  上段は、PCA（PC1 vs PC2）と第 2 埋め込みパネルの 2 つの Plotly 散布図、その右にウェハマップ SVG を並べた構成です。散布図は `scaleanchor` と `constrain: domain` で 1:1 比率に固定しています。第 2 パネルは通常 `t-SNE (after PCA)` ですが、`dbscan.clustering_space = "pca2d"` のときは `PCA space used for DBSCAN` を表示します。
+  上段は、左が **常に PCA（PC1 vs PC2）**、右が第 2 埋め込みの 2 つの Plotly 散布図、その右にウェハマップ SVG を並べた構成です。散布図は `scaleanchor` と `constrain: domain` で 1:1 比率に固定しています。右パネルの算法は **`[embedding] method`** で選びます（`tsne` → t-SNE、`umap` → UMAP、いずれも PCA 射影を入力とする。`pca2d` → 右も PC1 vs PC2 の 2D 表示）。
 - メイン列（左）
   下段は XRD プロファイル群です。先頭に `All profiles`、その下にクラスタごとの個別 Plotly 図を置いています。デスクトップでは 2 列、狭い画面では 1 列です。`grid.exclude_ranges` を設定していても、表示は除外前の全 2θ 範囲を使い、除外範囲はグレーの縦帯で示します。
 - メイン列（左）
@@ -24,7 +24,7 @@ Rigaku のXYマップ測定用 **rasX** をまとめて読み込み、XRD 回折
 
 ## 依存関係（実行時）
 
-`numpy`・`polars`・`scikit-learn`（PCA / DBSCAN / t-SNE）・`plotly`。
+`numpy`・`polars`・`scikit-learn`（PCA / DBSCAN / t-SNE）・`umap-learn`・`plotly`。
 
 ## セットアップ
 
@@ -75,9 +75,9 @@ uv run rasx-cluster-analyzer -v --config config.toml /path/to/rasx_dir
 3. `grid.exclude_ranges` があれば、クラスタリング用の特徴量に対してだけその 2θ 範囲の列を落とす。  
 4. クラスタリング用の特徴量に対して **行ごとの強度規格化**（`[preprocess]`、後述の「強度の規格化」参照）。既定は **L2**（各行ベクトルのノルムを 1 に）。  
 5. **StandardScaler** で **列ごと**（各 2θ 位置で全サンプル横断）に平均 0・分散 1。  
-6. **同じ行列**に **PCA** を 1 回フィットし、`n_components` 次元まで射影（次元はデータ形状で上限）。  
-7. **埋め込み図**: 左は **常に PC1 vs PC2**。右は通常、PCA 射影を入力とした **t-SNE（2D）**（`init='random'`）。ただし `dbscan.clustering_space = "pca2d"` のときは **t-SNE を計算せず**、右にも PCA 空間ベースの図を出す。`pca.n_components >= 2` なら、左の PCA 図は基本的に **PC1 / PC2 固定**で、`n_components` は主に右の t-SNE 側へ効く。  
-8. **DBSCAN** を設定に応じて **高次元特徴**・**t-SNE 2D 座標**・**PC1/PC2** のいずれかに適用しクラスタラベルを得る。  
+6. **同じ行列**に **PCA** を 1 回フィットし、`[pca] n_components` 次元まで射影（次元はデータ形状で上限）。  
+7. **埋め込み図**: 左は **常に PC1 vs PC2**。右は **`embedding.method`** に応じて、PCA 射影を入力とした **t-SNE（2D）**（`init='random'`）、**UMAP（2D）**、または **右も PC1 vs PC2（`pca2d`）** のいずれか。`pca.n_components >= 2` なら左図は **PC1 / PC2 固定**で、`pca.n_components` は主に **t-SNE / UMAP への入力次元**として効く。  
+8. **DBSCAN** を **`dbscan.clustering_space`** に応じて、列標準化後の特徴（`scaled`）・**PCA 全成分**（`pca`）・**右パネルと同じ 2D 埋め込み**（`embedding`）・**PC1/PC2**（`pca2d`）のいずれかに適用しクラスタラベルを得る。  
 9. **XRD 図**: まず **All profiles**、その下に各クラスタごとの **2θ–強度** の折線図を **別々の Plotly 図**として描く。ここで描いている強度は **除外前・行正規化後・列標準化前**。`exclude_ranges` は **グレー帯**で示す。ゼロ近傍・対数軸向けに極小正へクリップして **線が途切れない**ようにしている。  
 10. XRD 用フォームから、全 XRD 図に対して **X/Y 範囲**と **Y 軸の linear/log** を一括で変更できる。  
 11. ウェハーマップ用 SVG とメタデータ用 HTML を生成し、メイン列と右の sticky サイドバーに埋め込む。
@@ -151,26 +151,55 @@ intensity_normalization = "l2"   # または "max" / "none"
 | `[grid]` | `theta_min`, `theta_max`, `n_points` | 補間用 2θ の等間隔グリッド（度）。全スペクトルをここに揃える |
 | `[grid]` | `exclude_ranges`（任意） | 特徴量から除外する 2θ レンジ。`[[26.4, 27.2], [54.1, 55.0]]` のように指定 |
 | `[preprocess]` | `intensity_normalization` | `l2`（既定）・`max`・`none`。**セクション省略時も `l2` と同等** |
-| `[pca]` | `n_components` | PCA の主成分数（**2 以上**）。t-SNE への入力次元の上限にもなる。実際は `min(設定値, サンプル数, 特徴次元)` に制限 |
+| `[pca]` | `n_components` | PCA の主成分数（**2 以上**）。t-SNE / UMAP への入力次元の上限にもなる。実際は `min(設定値, サンプル数, 特徴次元)` に制限 |
 | `[pca]` | `random_state` | PCA の乱数種（再現性） |
-| `[tsne]` | `perplexity`, `max_iter`, `random_state` | t-SNE のパラメータ |
+| `[embedding]` | `method` | 右パネルの 2D 埋め込み: `tsne`・`umap`・`pca2d` |
+| `[embedding]` | `n_components` | 現状 **2 のみ**（HTML は 2D 固定） |
+| `[embedding.tsne]` | `perplexity`, `learning_rate`, `random_state`, `max_iter`（任意） | t-SNE。`learning_rate` は `"auto"` または正の数。`max_iter` 省略時は既定 1000 |
+| `[embedding.umap]` | `n_neighbors`, `min_dist`, `metric`, `random_state` | UMAP（`method = "umap"` のときに使用） |
 | `[dbscan]` | `eps`, `min_samples` | DBSCAN のパラメータ |
-| `[dbscan]` | `clustering_space` | `feature`（既定）・`tsne`・`pca2d`。DBSCAN をどの空間にかけるか |
+| `[dbscan]` | `clustering_space` | `scaled`（既定）・`pca`・`embedding`・`pca2d`。DBSCAN をどの空間にかけるか |
 | `[visualize]` | `xrd_min_panel_height_px` | 各 XRD 図の最小高さの基準値（px）。実際の描画高さはこれを下限としてさらに広めに取る |
 
 **制約・注意:**
 
-- `tsne.max_iter` は **250 以上**（scikit-learn の仕様）。  
+- `embedding.tsne.max_iter` は **250 以上**（scikit-learn の仕様）。省略時の既定は 1000。  
+- `embedding.n_components` は **2 のみ**許可（レイアウトが 2D 固定のため）。  
 - グリッドが各ファイルの 2θ 範囲と十分重ならない場合、ログに **カバー率の警告**が出ます。  
 - `grid.exclude_ranges` を使うと、指定した 2θ 範囲の列は **クラスタリング用特徴量から**落とされます。下段の XRD 図ではその範囲も表示され、灰色帯で示されます。  
 - サンプル数が少ないと PCA の実効次元が `n_components` 未満になります。  
-- 左の PCA 図は **PC1 / PC2 固定**です。`pca.n_components` を 2 より大きくしても、左図自体は基本的に変わりません。主に **t-SNE の入力次元**として効きます。  
-- t-SNE はサンプル数が大きいと時間がかかります。  
+- 左の PCA 図は **PC1 / PC2 固定**です。`pca.n_components` を 2 より大きくしても、左図自体は基本的に変わりません。主に **t-SNE / UMAP の入力次元**として効きます。  
+- t-SNE・UMAP はサンプル数が大きいと時間がかかります。`method = "pca2d"` のときは右パネル用に追加の多様体計算は行いません。  
 - ウェハーマップは **ファイル名から読んだ X/Y 座標**に依存します。命名規則から外れたファイルは前段でエラーになります。  
-- `dbscan.clustering_space = "feature"` の場合、高次元かつ列標準化後の距離スケールはデータ依存です。**DBSCAN の `eps` は実データで見直す**こと（全点がノイズ `-1` になりやすい場合は `eps` を大きめにする、など）。
-- `dbscan.clustering_space = "tsne"` の場合、可視化に使う **t-SNE 2D 座標**に DBSCAN を適用します。図上の塊に近いクラスタを得やすい一方、t-SNE の `perplexity` や乱数種にも影響されます。
-- `dbscan.clustering_space = "pca2d"` の場合、**PC1 / PC2** に対して DBSCAN を適用します。t-SNE が不安定なデータで、まず PCA 平面上の分離を見る用途に向きます。このモードでは t-SNE は計算せず、右パネルは **"PCA space used for DBSCAN"** 表示になります。
+- `dbscan.clustering_space = "scaled"` の場合、**列標準化後の高次元特徴**でクラスタリングします。距離スケールはデータ依存なので、**DBSCAN の `eps` は実データで見直す**こと（全点がノイズ `-1` になりやすい場合は `eps` を大きめにする、など）。
+- `dbscan.clustering_space = "pca"` の場合、**PCA 射影の全成分**（`pca.n_components` 次元、データ形状で上限）に DBSCAN をかけます。
+- `dbscan.clustering_space = "embedding"` の場合、**右パネルと同じ 2D 座標**（`embedding.method` が `tsne` / `umap` / `pca2d` のいずれかに対応）に DBSCAN をかけます。図上の塊に近い結果を得やすい一方、多様体側のパラメータや乱数種にも影響されます。
+- `dbscan.clustering_space = "pca2d"` の場合、**PC1 / PC2** のみに DBSCAN をかけます。PCA 平面上の分離を素直に見たいとき向きです（右パネルの見た目は `embedding.method` に依存します）。
 - `visualize.xrd_min_panel_height_px` を上げると、各 XRD 図の縦方向が広がって見やすくなります。現在は描画時に **約 1.5 倍**へ拡張して使っています。
+
+**設定例（抜粋）:**
+
+```toml
+[embedding]
+method = "tsne"   # "tsne" | "umap" | "pca2d"
+n_components = 2
+
+[embedding.tsne]
+perplexity = 30.0
+learning_rate = "auto"
+random_state = 42
+
+[embedding.umap]
+n_neighbors = 15
+min_dist = 0.1
+metric = "euclidean"
+random_state = 42
+
+[dbscan]
+clustering_space = "scaled"   # "scaled" | "pca" | "embedding" | "pca2d"
+```
+
+以前の設定ではトップレベル **`[tsne]`** や **`dbscan.clustering_space = "feature"` / `"tsne"`** を使っていました。現在は **`[embedding]`** と **`[embedding.tsne]` / `[embedding.umap]`**、および **`scaled` / `embedding`** に置き換えてください。
 
 リポジトリ付属の [`config.toml`](config.toml) をテンプレートにできます。
 

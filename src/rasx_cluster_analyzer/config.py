@@ -37,19 +37,40 @@ class PreprocessConfig:
 
 @dataclass(frozen=True, slots=True)
 class PcaConfig:
-    """PCA parameters (t-SNE への入力次元もここで決める)."""
+    """PCA parameters (manifold への入力次元もここで決める)."""
 
     n_components: int
     random_state: int
 
 
 @dataclass(frozen=True, slots=True)
-class TsneConfig:
-    """t-SNE parameters."""
+class TsneEmbedParams:
+    """t-SNE parameters under ``[embedding.tsne]``."""
 
     perplexity: float
-    max_iter: int
+    learning_rate: str | float  # "auto" or positive float
     random_state: int
+    max_iter: int
+
+
+@dataclass(frozen=True, slots=True)
+class UmapEmbedParams:
+    """UMAP parameters under ``[embedding.umap]``."""
+
+    n_neighbors: int
+    min_dist: float
+    metric: str
+    random_state: int
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingConfig:
+    """2D embedding for the right-hand scatter panel."""
+
+    method: str  # "tsne" | "umap" | "pca2d"
+    n_components: int
+    tsne: TsneEmbedParams
+    umap: UmapEmbedParams
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +79,7 @@ class DbscanConfig:
 
     eps: float
     min_samples: int
-    clustering_space: str = "feature"
+    clustering_space: str = "scaled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +97,7 @@ class AppConfig:
     grid: GridConfig
     preprocess: PreprocessConfig
     pca: PcaConfig
-    tsne: TsneConfig
+    embedding: EmbeddingConfig
     dbscan: DbscanConfig
     visualize: VisualizeConfig
 
@@ -201,6 +222,124 @@ def _load_visualize_config(data: dict[str, object]) -> VisualizeConfig:
     return VisualizeConfig(xrd_min_panel_height_px=min_height)
 
 
+def _load_tsne_learning_rate(tbl: dict[str, object], key: str) -> str | float:
+    if key not in tbl:
+        return "auto"
+    v = tbl[key]
+    if isinstance(v, str):
+        if v.strip().lower() == "auto":
+            return "auto"
+        msg = f"{key!r} must be 'auto' or a number"
+        raise ConfigError(msg)
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        msg = f"{key!r} must be 'auto' or a number"
+        raise ConfigError(msg)
+    lr = float(v)
+    if lr <= 0:
+        msg = f"{key!r} must be positive when numeric"
+        raise ConfigError(msg)
+    return lr
+
+
+def _req_str(tbl: dict[str, object], key: str) -> str:
+    if key not in tbl:
+        msg = f"Missing key {key!r}"
+        raise ConfigError(msg)
+    v = tbl[key]
+    if not isinstance(v, str):
+        msg = f"{key!r} must be a string"
+        raise ConfigError(msg)
+    return v
+
+
+def _load_tsne_embed_params(raw: object | None) -> TsneEmbedParams:
+    if raw is None:
+        return TsneEmbedParams(
+            perplexity=30.0,
+            learning_rate="auto",
+            random_state=0,
+            max_iter=1000,
+        )
+    if not isinstance(raw, dict):
+        msg = "[embedding.tsne] must be a table"
+        raise ConfigError(msg)
+    tbl = {str(k): v for k, v in raw.items()}
+    perplexity = _req_float(tbl, "perplexity") if "perplexity" in tbl else 30.0
+    learning_rate = _load_tsne_learning_rate(tbl, "learning_rate")
+    random_state = _req_int(tbl, "random_state") if "random_state" in tbl else 0
+    max_iter = _req_int(tbl, "max_iter") if "max_iter" in tbl else 1000
+    if perplexity <= 0:
+        msg = "embedding.tsne.perplexity must be positive"
+        raise ConfigError(msg)
+    if max_iter < 250:
+        msg = "embedding.tsne.max_iter must be >= 250 (scikit-learn TSNE constraint)"
+        raise ConfigError(msg)
+    return TsneEmbedParams(
+        perplexity=perplexity,
+        learning_rate=learning_rate,
+        random_state=random_state,
+        max_iter=max_iter,
+    )
+
+
+def _load_umap_embed_params(raw: object | None) -> UmapEmbedParams:
+    if raw is None:
+        return UmapEmbedParams(
+            n_neighbors=15,
+            min_dist=0.1,
+            metric="euclidean",
+            random_state=0,
+        )
+    if not isinstance(raw, dict):
+        msg = "[embedding.umap] must be a table"
+        raise ConfigError(msg)
+    tbl = {str(k): v for k, v in raw.items()}
+    n_neighbors = _req_int(tbl, "n_neighbors") if "n_neighbors" in tbl else 15
+    min_dist = _req_float(tbl, "min_dist") if "min_dist" in tbl else 0.1
+    metric = _req_str(tbl, "metric") if "metric" in tbl else "euclidean"
+    random_state = _req_int(tbl, "random_state") if "random_state" in tbl else 0
+    if n_neighbors < 2:
+        msg = "embedding.umap.n_neighbors must be >= 2"
+        raise ConfigError(msg)
+    if min_dist < 0:
+        msg = "embedding.umap.min_dist must be >= 0"
+        raise ConfigError(msg)
+    if not metric.strip():
+        msg = "embedding.umap.metric must be a non-empty string"
+        raise ConfigError(msg)
+    return UmapEmbedParams(
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        metric=metric,
+        random_state=random_state,
+    )
+
+
+def _load_embedding_config(emb_tbl: dict[str, object]) -> EmbeddingConfig:
+    method_raw = emb_tbl.get("method")
+    if not isinstance(method_raw, str):
+        msg = "embedding.method must be a string"
+        raise ConfigError(msg)
+    method = method_raw.strip().lower()
+    if method not in {"tsne", "umap", "pca2d"}:
+        msg = "embedding.method must be 'tsne', 'umap', or 'pca2d'"
+        raise ConfigError(msg)
+
+    n_comp_raw = emb_tbl.get("n_components", 2)
+    if not isinstance(n_comp_raw, int) or isinstance(n_comp_raw, bool):
+        msg = "embedding.n_components must be an integer"
+        raise ConfigError(msg)
+    n_components = int(n_comp_raw)
+    if n_components != 2:
+        msg = "embedding.n_components must be 2 (current HTML layout is 2D-only)"
+        raise ConfigError(msg)
+
+    tsne = _load_tsne_embed_params(emb_tbl.get("tsne"))
+    umap = _load_umap_embed_params(emb_tbl.get("umap"))
+
+    return EmbeddingConfig(method=method, n_components=n_components, tsne=tsne, umap=umap)
+
+
 def load_config(path: str | Path) -> AppConfig:
     """Parse TOML configuration from ``path``."""
     p = Path(path)
@@ -221,8 +360,8 @@ def load_config(path: str | Path) -> AppConfig:
     paths_tbl = _req_section(data, "paths")
     grid_tbl = _req_section(data, "grid")
     pca_tbl = _req_section(data, "pca")
-    tsne_tbl = _req_section(data, "tsne")
     dbscan_tbl = _req_section(data, "dbscan")
+    emb_tbl = _req_section(data, "embedding")
 
     paths = PathsConfig(output_html=_opt_str(paths_tbl, "output_html"))
 
@@ -250,22 +389,12 @@ def load_config(path: str | Path) -> AppConfig:
         msg = "pca.n_components must be >= 2"
         raise ConfigError(msg)
 
-    tsne = TsneConfig(
-        perplexity=_req_float(tsne_tbl, "perplexity"),
-        max_iter=_req_int(tsne_tbl, "max_iter"),
-        random_state=_req_int(tsne_tbl, "random_state"),
-    )
-    if tsne.perplexity <= 0:
-        msg = "tsne.perplexity must be positive"
-        raise ConfigError(msg)
-    if tsne.max_iter < 250:
-        msg = "tsne.max_iter must be >= 250 (scikit-learn TSNE constraint)"
-        raise ConfigError(msg)
+    embedding = _load_embedding_config(emb_tbl)
 
     dbscan = DbscanConfig(
         eps=_req_float(dbscan_tbl, "eps"),
         min_samples=_req_int(dbscan_tbl, "min_samples"),
-        clustering_space=_opt_normalized_str(dbscan_tbl, "clustering_space") or "feature",
+        clustering_space=_opt_normalized_str(dbscan_tbl, "clustering_space") or "scaled",
     )
     if dbscan.eps <= 0:
         msg = "dbscan.eps must be positive"
@@ -273,8 +402,8 @@ def load_config(path: str | Path) -> AppConfig:
     if dbscan.min_samples < 1:
         msg = "dbscan.min_samples must be >= 1"
         raise ConfigError(msg)
-    if dbscan.clustering_space not in {"feature", "tsne", "pca2d"}:
-        msg = "dbscan.clustering_space must be 'feature', 'tsne', or 'pca2d'"
+    if dbscan.clustering_space not in {"scaled", "pca", "embedding", "pca2d"}:
+        msg = "dbscan.clustering_space must be 'scaled', 'pca', 'embedding', or 'pca2d'"
         raise ConfigError(msg)
 
     return AppConfig(
@@ -282,7 +411,7 @@ def load_config(path: str | Path) -> AppConfig:
         grid=grid,
         preprocess=preprocess,
         pca=pca,
-        tsne=tsne,
+        embedding=embedding,
         dbscan=dbscan,
         visualize=visualize,
     )

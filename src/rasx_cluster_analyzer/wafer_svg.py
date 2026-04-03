@@ -164,9 +164,8 @@ def build_wafer_cluster_map_panel_html(
         inside = is_inside_wafer(xm, ym, diameter_mm, flat_length_mm)
         opacity = "1" if inside else "0.45"
         stroke = "#333333" if inside else "#E65100"
-        title = (
-            f"{names[i]}\n{_legend_name(lab)}\nx={xm:.3f} mm, y={ym:.3f} mm"
-            + ("" if inside else "\n(outside wafer outline)")
+        title = f"{names[i]}\n{_legend_name(lab)}\nx={xm:.3f} mm, y={ym:.3f} mm" + (
+            "" if inside else "\n(outside wafer outline)"
         )
         point_elems.append(
             f'<circle cx="{px:.6g}" cy="{py:.6g}" r="4.2" fill="{escape(fill)}" '
@@ -217,9 +216,7 @@ def build_wafer_cluster_map_panel_html(
     {ax_x}
   </svg>"""
 
-    legend_html = (
-        '<div class="rasx-wafer-legend" role="list">' + "".join(legend_items) + "</div>"
-    )
+    legend_html = '<div class="rasx-wafer-legend" role="list">' + "".join(legend_items) + "</div>"
 
     return f"""<section class="rasx-wafer-panel">
   <h2 class="rasx-wafer-title">Wafer map (clusters)</h2>

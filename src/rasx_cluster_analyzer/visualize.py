@@ -135,11 +135,22 @@ def _secondary_embedding_axis_titles(secondary_title: str) -> tuple[str, str]:
     key = secondary_title.casefold()
     if "pca space used for dbscan" in key:
         return ("PC1", "PC2")
+    if "pc1 vs pc2" in key and "2d embedding" in key:
+        return ("PC1", "PC2")
     if "umap" in key:
         return ("UMAP dimension 1", "UMAP dimension 2")
     if "t-sne" in key or "tsne" in key:
         return ("tSNE1", "tSNE2")
     return ("Embedding dimension 1", "Embedding dimension 2")
+
+
+def _embedding_layout_title(cfg: AppConfig) -> str:
+    m = cfg.embedding.method
+    if m == "umap":
+        return "Embedding (PCA / UMAP)"
+    if m == "pca2d":
+        return "Embedding (PCA)"
+    return "Embedding (PCA / t-SNE)"
 
 
 def build_embedding_figure(
@@ -149,6 +160,7 @@ def build_embedding_figure(
     meta: pl.DataFrame,
     *,
     secondary_title: str = "t-SNE (after PCA)",
+    layout_title: str = "Embedding (PCA / t-SNE)",
     secondary_x_title: str | None = None,
     secondary_y_title: str | None = None,
 ) -> go.Figure:
@@ -252,7 +264,7 @@ def build_embedding_figure(
     fig.update_layout(
         template="simple_white",
         font=dict(family="Times New Roman, Times, serif", size=14, color="black"),
-        title=dict(text="Embedding (PCA / t-SNE)", x=0.5, xanchor="center"),
+        title=dict(text=layout_title, x=0.5, xanchor="center"),
         plot_bgcolor="white",
         paper_bgcolor="white",
         margin=dict(l=72, r=200, t=80, b=72),
@@ -569,15 +581,36 @@ def build_metadata_sidebar_html(
             f"{cfg.grid.theta_min} – {cfg.grid.theta_max}, n={cfg.grid.n_points}",
         ),
         dt("Intensity normalization", cfg.preprocess.intensity_normalization),
+        dt("Embedding method", cfg.embedding.method),
         dt("PCA components", str(cfg.pca.n_components)),
         dt("PCA random_state", str(cfg.pca.random_state)),
-        dt("t-SNE perplexity", str(cfg.tsne.perplexity)),
-        dt("t-SNE max_iter", str(cfg.tsne.max_iter)),
-        dt("t-SNE random_state", str(cfg.tsne.random_state)),
-        dt("DBSCAN eps", str(cfg.dbscan.eps)),
-        dt("DBSCAN min_samples", str(cfg.dbscan.min_samples)),
-        dt("DBSCAN space", cfg.dbscan.clustering_space),
     ]
+    em = cfg.embedding.method
+    if em == "tsne":
+        rows.extend(
+            [
+                dt("t-SNE perplexity", str(cfg.embedding.tsne.perplexity)),
+                dt("t-SNE learning_rate", str(cfg.embedding.tsne.learning_rate)),
+                dt("t-SNE max_iter", str(cfg.embedding.tsne.max_iter)),
+                dt("t-SNE random_state", str(cfg.embedding.tsne.random_state)),
+            ]
+        )
+    elif em == "umap":
+        rows.extend(
+            [
+                dt("UMAP n_neighbors", str(cfg.embedding.umap.n_neighbors)),
+                dt("UMAP min_dist", str(cfg.embedding.umap.min_dist)),
+                dt("UMAP metric", cfg.embedding.umap.metric),
+                dt("UMAP random_state", str(cfg.embedding.umap.random_state)),
+            ]
+        )
+    rows.extend(
+        [
+            dt("DBSCAN eps", str(cfg.dbscan.eps)),
+            dt("DBSCAN min_samples", str(cfg.dbscan.min_samples)),
+            dt("DBSCAN space", cfg.dbscan.clustering_space),
+        ]
+    )
     if cfg.paths.output_html:
         rows.insert(3, dt("Config output_html", cfg.paths.output_html))
 
@@ -1035,6 +1068,7 @@ def write_cluster_map_html(
         labels,
         meta,
         secondary_title=secondary_title,
+        layout_title=_embedding_layout_title(config),
     )
     emb_html = pio.to_html(
         fig_emb,
@@ -1073,7 +1107,7 @@ def write_cluster_map_html(
             separators=(",", ":"),
         )
         fragment += (
-            f'<script>'
+            f"<script>"
             f'document.getElementById("{div_id}").__rasxOriginalY = {original_y_json};'
             f"</script>"
         )
