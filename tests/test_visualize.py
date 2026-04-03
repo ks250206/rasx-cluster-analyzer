@@ -20,6 +20,8 @@ from rasx_cluster_analyzer.config import (
 )
 from rasx_cluster_analyzer.visualize import (
     _secondary_embedding_axis_titles,
+    _xrd_controls_html,
+    _xrd_controls_script,
     _y_profile_for_plot,
     build_embedding_figure,
     build_xrd_profiles_figure,
@@ -64,6 +66,28 @@ def test_y_profile_for_plot_no_nan_gaps() -> None:
     assert not np.any(np.isnan(out))
     assert np.all(np.isfinite(out))
     assert np.all(out > 0)
+
+
+def test_xrd_controls_include_intensity_floor() -> None:
+    html = _xrd_controls_html()
+    assert 'name="y_floor"' in html
+    assert "Intensity floor" in html
+    assert 'placeholder="1e-6"' in html
+    assert 'name="y_offset"' in html
+    assert "Intensity offset" in html
+    assert 'placeholder="0.001"' in html
+
+
+def test_xrd_controls_script_applies_and_resets_floor_and_offset() -> None:
+    script = _xrd_controls_script()
+    assert "applyIntensityTransform" in script
+    assert "plot.__rasxOriginalY" in script
+    assert 'const yFloor = parsePositiveNumber(data.get("y_floor"));' in script
+    assert 'const yOffset = parseNumber(data.get("y_offset"));' in script
+    assert "const shifted = value + offsetValue;" in script
+    assert "floorValue == null || shifted >= floorValue ? shifted : floorValue" in script
+    assert 'Plotly.restyle(plot, {y: [nextRow]}, [index]);' in script
+    assert "applyIntensityTransform(plot, null, 0);" in script
 
 
 def test_build_embedding_figure_smoke() -> None:
@@ -213,7 +237,9 @@ def test_write_cluster_map_html_layout(tmp_path: Path) -> None:
     assert "cluster 1" in text
     assert "rasx-embedding-plot" in text
     assert "rasx-xrd-plot-0" in text
-    assert 'class="rasx-xrd-plot"' in text
+    assert 'class="plotly-graph-div rasx-xrd-plot"' in text
+    assert '__rasxOriginalY = [[' in text
+    assert 'class="rasx-xrd-plot" class="plotly-graph-div"' not in text
     assert "plot-gap" in text
     assert "rasx-meta-sidebar" in text
     assert 'id="rasx-meta-sidebar"' in text

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -408,6 +409,12 @@ def _xrd_controls_html() -> str:
         <label>X max <input type="number" step="any" name="x_max" /></label>
         <label>Y min <input type="number" step="any" name="y_min" /></label>
         <label>Y max <input type="number" step="any" name="y_max" /></label>
+        <label>Intensity floor
+          <input type="number" step="any" min="0" name="y_floor" placeholder="1e-6" />
+        </label>
+        <label>Intensity offset
+          <input type="number" step="any" name="y_offset" placeholder="0.001" />
+        </label>
         <label>Y scale
           <select name="y_type">
             <option value="linear">linear</option>
@@ -429,6 +436,32 @@ def _xrd_controls_script() -> str:
       const form = document.getElementById("rasx-xrd-axis-form");
       const reset = document.getElementById("rasx-xrd-axis-reset");
       const targets = () => Array.from(document.querySelectorAll(".rasx-xrd-plot"));
+      function ensureOriginalY(plot) {
+        if (!plot.__rasxOriginalY) {
+          plot.__rasxOriginalY = plot.data.map((trace) => Array.from(trace.y || []));
+        }
+        return plot.__rasxOriginalY;
+      }
+      function parsePositiveNumber(value) {
+        if (value === "" || value == null) return null;
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? num : null;
+      }
+      function parseNumber(value) {
+        if (value === "" || value == null) return 0;
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      }
+      function applyIntensityTransform(plot, floorValue, offsetValue) {
+        const originalY = ensureOriginalY(plot);
+        originalY.forEach((row, index) => {
+          const nextRow = row.map((value) => {
+            const shifted = value + offsetValue;
+            return floorValue == null || shifted >= floorValue ? shifted : floorValue;
+          });
+          Plotly.restyle(plot, {y: [nextRow]}, [index]);
+        });
+      }
       if (!form) return;
 
       form.addEventListener("submit", function (event) {
@@ -438,6 +471,8 @@ def _xrd_controls_script() -> str:
         const xMax = data.get("x_max");
         const yMin = data.get("y_min");
         const yMax = data.get("y_max");
+        const yFloor = parsePositiveNumber(data.get("y_floor"));
+        const yOffset = parseNumber(data.get("y_offset"));
         const yType = data.get("y_type") || "linear";
         const update = {
           "yaxis.type": yType,
@@ -446,7 +481,10 @@ def _xrd_controls_script() -> str:
         };
         if (xMin !== "" && xMax !== "") update["xaxis.range"] = [Number(xMin), Number(xMax)];
         if (yMin !== "" && yMax !== "") update["yaxis.range"] = [Number(yMin), Number(yMax)];
-        targets().forEach((plot) => Plotly.relayout(plot, update));
+        targets().forEach((plot) => {
+          applyIntensityTransform(plot, yFloor, yOffset);
+          Plotly.relayout(plot, update);
+        });
       });
 
       reset.addEventListener("click", function () {
@@ -460,7 +498,10 @@ def _xrd_controls_script() -> str:
           "yaxis.exponentformat": null,
           "yaxis.showexponent": null,
         };
-        targets().forEach((plot) => Plotly.relayout(plot, update));
+        targets().forEach((plot) => {
+          applyIntensityTransform(plot, null, 0);
+          Plotly.relayout(plot, update);
+        });
       });
     }());
     </script>
@@ -1023,9 +1064,18 @@ def write_cluster_map_html(
             config={"responsive": True},
         )
         fragment = fragment.replace(
-            f'id="{div_id}"',
-            f'id="{div_id}" class="rasx-xrd-plot"',
+            'class="plotly-graph-div"',
+            'class="plotly-graph-div rasx-xrd-plot"',
             1,
+        )
+        original_y_json = json.dumps(
+            [_y_profile_for_plot(row).tolist() for row in intensity_part],
+            separators=(",", ":"),
+        )
+        fragment += (
+            f'<script>'
+            f'document.getElementById("{div_id}").__rasxOriginalY = {original_y_json};'
+            f"</script>"
         )
         panel_class = "rasx-xrd-panel rasx-xrd-panel--all" if i == 0 else "rasx-xrd-panel"
         xrd_fragments.append(f'<section class="{panel_class}">{fragment}</section>')
