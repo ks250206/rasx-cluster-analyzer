@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rasx-cluster-analyzer"
+version = "0.1.0"
+description = "Cluster XRD patterns from Rigaku rasX map scans and visualize with PCA/t-SNE"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.0",
+    "polars>=1.0",
+    "scikit-learn>=1.5",
+    "plotly>=5.24",
+]
+
+[project.scripts]
+rasx-cluster-analyzer = "rasx_cluster_analyzer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "ty>=0.0.28",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+
+[tool.coverage.run]
+source = ["rasx_cluster_analyzer"]
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

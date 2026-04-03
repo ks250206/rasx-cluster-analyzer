@@ -1,0 +1,31 @@
+[paths]
+# output_html = "out/cluster_map.html"
+
+[grid]
+theta_min = 20.0
+theta_max = 80.0
+n_points = 601
+# 基板ピークを落としたい場合の 2theta 除外レンジ（任意）
+exclude_ranges = [[20,30.0],[50,80]] #[[26.4, 27.2], [54.1, 55.0]]
+
+# スペクトル（行）ごとの強度規格化: l2 | max | none（省略時は l2）
+[preprocess]
+intensity_normalization = "l2" #"l2"
+
+[pca]
+# t-SNE への入力次元（実際は min(n_components, n_samples, n_features) に制限）
+n_components = 50 
+random_state = 0
+
+[tsne]
+perplexity = 10.0
+max_iter = 1500
+random_state = 0
+
+[dbscan]
+eps = 4 
+min_samples = 2 
+clustering_space = "feature" # "feature" | "tsne" | "pca2d"
+
+[visualize]
+xrd_min_panel_height_px = 280

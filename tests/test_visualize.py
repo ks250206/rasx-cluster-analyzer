@@ -1,0 +1,171 @@
+"""Tests for Plotly figure generation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import polars as pl
+import pytest
+
+from rasx_cluster_analyzer.config import (
+    AppConfig,
+    DbscanConfig,
+    GridConfig,
+    PathsConfig,
+    PcaConfig,
+    PreprocessConfig,
+    TsneConfig,
+    VisualizeConfig,
+)
+from rasx_cluster_analyzer.visualize import (
+    _y_profile_for_plot,
+    build_embedding_figure,
+    build_xrd_profiles_figure,
+    write_cluster_map_html,
+)
+
+
+def _minimal_cfg() -> AppConfig:
+    return AppConfig(
+        paths=PathsConfig(output_html=None),
+        grid=GridConfig(
+            theta_min=10.0,
+            theta_max=30.0,
+            n_points=5,
+            exclude_ranges=((12.0, 14.0),),
+        ),
+        preprocess=PreprocessConfig(intensity_normalization="none"),
+        pca=PcaConfig(n_components=2, random_state=0),
+        tsne=TsneConfig(perplexity=2.0, max_iter=100, random_state=0),
+        dbscan=DbscanConfig(eps=1.0, min_samples=2, clustering_space="feature"),
+        visualize=VisualizeConfig(xrd_min_panel_height_px=280),
+    )
+
+
+def test_y_profile_for_plot_no_nan_gaps() -> None:
+    y = np.array([0.0, 1.0, 0.0, 2.0, -0.5], dtype=np.float64)
+    out = _y_profile_for_plot(y)
+    assert not np.any(np.isnan(out))
+    assert np.all(np.isfinite(out))
+    assert np.all(out > 0)
+
+
+def test_build_embedding_figure_smoke() -> None:
+    n = 4
+    pca_xy = np.arange(n * 2, dtype=np.float64).reshape(n, 2)
+    tsne_xy = np.arange(n * 2, dtype=np.float64).reshape(n, 2) * 0.5
+    labels = np.array([-1, 0, 0, 1], dtype=np.int64)
+    meta = pl.DataFrame(
+        {
+            "path": [f"/tmp/f{i}.rasx" for i in range(n)],
+            "stem": [f"f{i}" for i in range(n)],
+            "sample": ["s"] * n,
+            "index": list(range(n)),
+            "x_mm": [0.0, 1.0, 2.0, 3.0],
+            "y_mm": [0.0, 0.0, 1.0, 1.0],
+            "theta_coverage": [1.0] * n,
+        }
+    )
+    fig = build_embedding_figure(pca_xy, tsne_xy, labels, meta)
+    assert fig.layout.title is not None
+    n_lab = len({int(x) for x in np.unique(labels)})
+    assert len(fig.data) == 2 * n_lab
+    assert fig.layout.yaxis.scaleanchor == "x"
+    assert fig.layout.yaxis2.scaleanchor == "x2"
+
+
+def test_build_xrd_profiles_figure_smoke() -> None:
+    n = 4
+    n_theta = 5
+    meta = pl.DataFrame(
+        {
+            "path": [f"/tmp/f{i}.rasx" for i in range(n)],
+            "stem": [f"f{i}" for i in range(n)],
+            "sample": ["s"] * n,
+            "index": list(range(n)),
+            "x_mm": [0.0, 1.0, 2.0, 3.0],
+            "y_mm": [0.0, 0.0, 1.0, 1.0],
+            "theta_coverage": [1.0] * n,
+        }
+    )
+    twotheta = np.linspace(10.0, 30.0, n_theta, dtype=np.float64)
+    intensity = np.arange(n * n_theta, dtype=np.float64).reshape(n, n_theta)
+    fig = build_xrd_profiles_figure(
+        "All profiles",
+        meta,
+        twotheta,
+        intensity,
+        exclude_ranges=((12.0, 14.0),),
+        xrd_min_panel_height_px=280,
+    )
+    assert len(fig.data) == n
+    assert len(fig.layout.shapes) == 1
+    assert fig.layout.height >= 400
+    assert all(getattr(tr, "showlegend", False) for tr in fig.data)
+    assert len({tr.line.color for tr in fig.data}) == n
+
+
+def test_build_xrd_profiles_figure_rejects_shape_mismatch() -> None:
+    meta = pl.DataFrame(
+        {
+            "path": ["/tmp/a.rasx", "/tmp/b.rasx"],
+            "stem": ["a", "b"],
+            "sample": ["s", "s"],
+            "index": [0, 1],
+            "x_mm": [0.0, 1.0],
+            "y_mm": [0.0, 0.0],
+            "theta_coverage": [1.0, 1.0],
+        }
+    )
+    twotheta = np.linspace(0.0, 1.0, 3)
+    bad = np.zeros((3, 3), dtype=np.float64)
+    with pytest.raises(ValueError, match="match meta"):
+        build_xrd_profiles_figure("Bad", meta, twotheta, bad)
+
+
+def test_write_cluster_map_html_layout(tmp_path: Path) -> None:
+    n = 3
+    n_theta = 4
+    pca_xy = np.zeros((n, 2), dtype=np.float64)
+    tsne_xy = np.zeros((n, 2), dtype=np.float64)
+    labels = np.array([0, 0, 1], dtype=np.int64)
+    meta = pl.DataFrame(
+        {
+            "path": [str(tmp_path / f"f{i}.rasx") for i in range(n)],
+            "stem": [f"f{i}" for i in range(n)],
+            "sample": ["s"] * n,
+            "index": list(range(n)),
+            "x_mm": [0.0, 1.0, 2.0],
+            "y_mm": [0.0, 0.0, 0.0],
+            "theta_coverage": [1.0] * n,
+        }
+    )
+    twotheta = np.linspace(10.0, 20.0, n_theta)
+    intensity = np.ones((n, n_theta), dtype=np.float64)
+    out = tmp_path / "out.html"
+    write_cluster_map_html(
+        out,
+        pca_xy,
+        tsne_xy,
+        labels,
+        meta,
+        twotheta,
+        intensity,
+        config=_minimal_cfg(),
+        rasx_dir=tmp_path,
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "解析メタデータ" in text
+    assert "クラスタ別ファイル一覧" in text
+    assert "XRD Axis Controls" in text
+    assert "All profiles" in text
+    assert "cluster 0" in text
+    assert "cluster 1" in text
+    assert "rasx-embedding-plot" in text
+    assert "rasx-xrd-plot-0" in text
+    assert 'class="rasx-xrd-plot"' in text
+    assert "plot-gap" in text
+    assert "rasx-meta-sidebar" in text
+    assert "position: sticky" in text
+    assert "height: 100vh" in text
