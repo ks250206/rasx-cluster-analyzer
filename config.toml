@@ -25,7 +25,7 @@ random_state = 0
 [dbscan]
 eps = 4 
 min_samples = 2 
-clustering_space = "feature" # "feature" | "tsne" | "pca2d"
+clustering_space = "pca2d" # "feature" | "tsne" | "pca2d"
 
 [visualize]
 xrd_min_panel_height_px = 280
